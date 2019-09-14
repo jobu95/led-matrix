@@ -3,19 +3,19 @@
 from moviepy.editor import *
 from moviepy.video.fx.all import *
 
-clip = VideoFileClip("numa_numa.mp4")
+clip = VideoFileClip("/home/jburton/Downloads/2001.mp4")
 
-#clip = clip.subclip(51, 86)
+#clip = clip.subclip(8, 28)
 
 (clip_wd, clip_ht) = clip.size
 print("Input is %d x %d" % (clip_wd, clip_ht,))
 
-opt = 0
+opt = 1
 if opt == 0:
     # Cut out a square from the middle
-    clip_xcent = clip_wd * 2/5
-    clip_ycent = clip_ht / 2
-    output_dim = min(clip_wd, clip_ht)
+    clip_xcent = clip_wd / 2
+    clip_ycent = clip_ht * 58 / 100
+    output_dim = min(clip_wd, clip_ht) * 95 / 100
 
     clip = crop(clip,
             x1=clip_xcent - output_dim/2,
