@@ -5,6 +5,13 @@ import numpy as np
 import sys
 from time import sleep
 
+if len(sys.argv) != 2:
+    print("Usage: %s state_file" % sys.argv[0])
+    sys.exit(1)
+
+state_file=sys.argv[1]
+print("Using state file %s" % state_file)
+
 xdim = 64
 ydim = 64
 chan = 3
@@ -13,6 +20,26 @@ chan = 3
 # next frame, then we switch them.
 # By convention, board will be indexed like board[y][x].
 board = np.zeros((xdim, ydim, chan), np.uint8)
+#frame = np.zeros((xdim, ydim), np.bool)
+
+with open(state_file, 'r') as state_f:
+    y = 0
+    for line in state_f:
+        if y + 1 > ydim:
+            print("State file has >= %d lines, need at most %d" % (y, ydim))
+            sys.exit(1)
+        if len(line.strip()) != xdim:
+            print("State file has line of length %d, need %d" % (len(line.strip()), xdim))
+            sys.exit(1)
+
+        x = 0
+        for char in line:
+            if char == '\n':
+                break
+            if char != '.':
+                board[y][x] = [255,255,255]
+            x += 1
+        y += 1
 
 def getNeighbors(board, x, y):
     left_x  = x - 1
@@ -46,6 +73,9 @@ def getNeighbors(board, x, y):
             int(board[down_y][left_x][0] == 255) +
             int(board[y][left_x][0] == 255) +
             int(board[up_y][left_x][0] == 255))
+
+def color(neighbors):
+    return [neighbors * 32, neighbors * 32, neighbors * 32]
 
 def step(board_in, board_out):
     for y in range(0, len(board_in)):
@@ -81,17 +111,14 @@ def printBoard(board):
         line = boardRow2Str(board[y])
         print(line)
 
-# Glider
-board[32][10] = [255, 255, 255]
-board[33][11] = [255, 255, 255]
-board[33][12] = [255, 255, 255]
-board[32][12] = [255, 255, 255]
-board[31][12] = [255, 255, 255]
-
 frame_delay_ms = 16
 cv2.namedWindow('conway', cv2.WINDOW_NORMAL)
 cv2.resizeWindow('conway', 640, 640)
+frame_count = 0
 while True:
+    if frame_count % 100 == 0:
+        print(frame_count)
+    frame_count += 1
     #printBoard(board)
     cv2.imshow('conway', board)
     if (cv2.waitKey(frame_delay_ms) & 0xFF) == ord('q'):
