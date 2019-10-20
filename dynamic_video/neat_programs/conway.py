@@ -19,8 +19,7 @@ chan = 3
 # We flip between two boards. One is used as the reference to calculate the
 # next frame, then we switch them.
 # By convention, board will be indexed like board[y][x].
-board = np.zeros((xdim, ydim, chan), np.uint8)
-#frame = np.zeros((xdim, ydim), np.bool)
+board = np.zeros((xdim, ydim), np.bool)
 
 with open(state_file, 'r') as state_f:
     y = 0
@@ -37,7 +36,7 @@ with open(state_file, 'r') as state_f:
             if char == '\n':
                 break
             if char != '.':
-                board[y][x] = [255,255,255]
+                board[y][x] = 1
             x += 1
         y += 1
 
@@ -65,42 +64,62 @@ def getNeighbors(board, x, y):
 #        print("%d,%d has neighbor at %d,%d: %d" % (x, y, up_y, left_x, board[up_y][left_x]))
 
     # Start at 12 o'clock position, add up moving clockwise
-    return (int(board[up_y][x][0] == 255) +
-            int(board[up_y][right_x][0] == 255) +
-            int(board[y][right_x][0] == 255) +
-            int(board[down_y][right_x][0] == 255) +
-            int(board[down_y][x][0] == 255) +
-            int(board[down_y][left_x][0] == 255) +
-            int(board[y][left_x][0] == 255) +
-            int(board[up_y][left_x][0] == 255))
+    return (int(board[up_y][x] == 1) +
+            (board[up_y][right_x] == 1) +
+            (board[y][right_x] == 1) +
+            (board[down_y][right_x] == 1) +
+            (board[down_y][x] == 1) +
+            (board[down_y][left_x] == 1) +
+            (board[y][left_x] == 1) +
+            (board[up_y][left_x] == 1))
 
 def color(neighbors):
-    return [neighbors * 32, neighbors * 32, neighbors * 32]
+    if neighbors == 0:
+        return [0,0,0]
+    elif neighbors == 1:
+        return [256,0,0]
+    elif neighbors == 2:
+        return [192,64,0]
+    elif neighbors == 3:
+        return [128,128,0]
+    elif neighbors == 4:
+        return [64,192,0]
+    elif neighbors == 5:
+        return [0,256,0]
+    elif neighbors == 6:
+        return [0,192,64]
+    elif neighbors == 7:
+        return [0,128,128]
+    elif neighbors == 8:
+        return [0,64,192]
 
-def step(board_in, board_out):
+def step(board_in, board_out, frame):
     for y in range(0, len(board_in)):
         for x in range(0, len(board_in[0])):
             neighbors = getNeighbors(board_in, x, y)
-            if board_in[y][x][0] == 0:
+            #if neighbors > 0:
+            #    print("%d,%d has %d neighbors" % (x, y, neighbors))
+            if board_in[y][x] == 0:
                 # Looking at a dead cell
                 if neighbors == 3:
                     # It's fuck time
-                    board_out[y][x] = [255,255,255]
+                    board_out[y][x] = 1
             else:
                 # Looking at a live cell
                 if neighbors < 2:
                     # Death by underpopulation
-                    board_out[y][x] = [0,0,0]
+                    board_out[y][x] = 0
                 elif neighbors > 3:
                     # Death by overpopulation
-                    board_out[y][x] = [0,0,0]
+                    board_out[y][x] = 0
                 else:
-                    board_out[y][x] = [255,255,255]
+                    board_out[y][x] = 1
+            frame[y][x] = color(neighbors)
 
 def boardRow2Str(row):
     res = ""
     for x in row:
-        if x[0] == 0:
+        if x == 0:
             res += '.'
         else:
             res += 'x'
@@ -115,15 +134,42 @@ frame_delay_ms = 16
 cv2.namedWindow('conway', cv2.WINDOW_NORMAL)
 cv2.resizeWindow('conway', 640, 640)
 frame_count = 0
+alt_board = np.zeros((xdim, ydim), np.bool)
+frame = np.zeros((xdim, ydim, chan), np.uint8)
+
+scale = 10
+scaled_frame = np.zeros((xdim * scale, ydim * scale, chan), np.uint8)
+#scaled_frame = np.zeros((640, 640, chan), np.uint8)
+
+#fourcc = cv2.VideoWriter_fourcc('X', '2', '6', '4') # mp4
+fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G') # avi
+out = cv2.VideoWriter('conway.avi', fourcc, 60, (xdim * scale, ydim * scale))
+#out = cv2.VideoWriter('conway.avi', fourcc, 60, (640,640))
+#for i in range(1,600):
+#    out.write(scaled_frame)
+
 while True:
+    # Display current frame
     if frame_count % 100 == 0:
         print(frame_count)
     frame_count += 1
     #printBoard(board)
-    cv2.imshow('conway', board)
+    cv2.imshow('conway', frame)
+    cv2.resize(frame, (xdim * scale, ydim * scale), scaled_frame, scale, scale, cv2.INTER_NEAREST)
+    out.write(scaled_frame)
     if (cv2.waitKey(frame_delay_ms) & 0xFF) == ord('q'):
         break
-    tmp_board = np.zeros((xdim, ydim, chan), np.uint8)
-    step(board, tmp_board)
-    board = tmp_board
+
+    # Calculate next frame
+    frame.fill(0)
+    step(board, alt_board, frame)
+    tmp_board = board
+    board = alt_board
+    alt_board = tmp_board
+    alt_board.fill(0)
+
+    if frame_count == 768:
+        break
+
+
 
