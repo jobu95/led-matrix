@@ -74,24 +74,41 @@ def getNeighbors(board, x, y):
             (board[up_y][left_x] == 1))
 
 def color(neighbors):
-    if neighbors == 0:
-        return [0,0,0]
-    elif neighbors == 1:
-        return [256,0,0]
-    elif neighbors == 2:
-        return [192,64,0]
-    elif neighbors == 3:
-        return [128,128,0]
-    elif neighbors == 4:
-        return [64,192,0]
-    elif neighbors == 5:
-        return [0,256,0]
-    elif neighbors == 6:
-        return [0,192,64]
-    elif neighbors == 7:
-        return [0,128,128]
-    elif neighbors == 8:
-        return [0,64,192]
+    if False:
+        if neighbors == 2 or neighbors == 3:
+            return [0xff,0xff,0xff]
+        else:
+            return [0x00,0x00,0x00]
+    else:
+        if neighbors == 0:
+            return [0x00,0x00,0x00]
+        elif neighbors == 1:
+            return [0x00,0x00,0x00]
+        elif neighbors == 2:
+            # dcf5ff, white
+            return [0xdc,0xf5,0xff]
+        elif neighbors == 3:
+            # e6c86e, gold
+            return [0xe6,0xc8,0x6e]
+        elif neighbors == 4:
+            # 508cd7, blue
+            return [0x50,0x8c,0xd7]
+        elif neighbors == 5:
+            return [0x00,0x00,0x00]
+        elif neighbors == 6:
+            return [0x00,0x00,0x00]
+        elif neighbors == 7:
+            return [0x00,0x00,0x00]
+        elif neighbors == 8:
+            return [0x00,0x00,0x00]
+        # d77355, red
+        #return [0xe7,0x7c,0x55]
+        # 646964, gray
+        #return [0x00,0x00,0x00]
+        # 55415f, purple
+        #return [0x55,0x41,0x5f]
+        # dcf5ff, white
+        #return [0xdc,0xf5,0xff]
 
 def step(board_in, board_out, frame):
     for y in range(0, len(board_in)):
@@ -104,6 +121,7 @@ def step(board_in, board_out, frame):
                 if neighbors == 3:
                     # It's fuck time
                     board_out[y][x] = 1
+                    frame[y][x] = color(neighbors)
             else:
                 # Looking at a live cell
                 if neighbors < 2:
@@ -114,7 +132,7 @@ def step(board_in, board_out, frame):
                     board_out[y][x] = 0
                 else:
                     board_out[y][x] = 1
-            frame[y][x] = color(neighbors)
+                    frame[y][x] = color(neighbors)
 
 def boardRow2Str(row):
     res = ""
@@ -143,7 +161,8 @@ scaled_frame = np.zeros((xdim * scale, ydim * scale, chan), np.uint8)
 
 #fourcc = cv2.VideoWriter_fourcc('X', '2', '6', '4') # mp4
 fourcc = cv2.VideoWriter_fourcc('M', 'J', 'P', 'G') # avi
-out = cv2.VideoWriter('conway.avi', fourcc, 60, (xdim * scale, ydim * scale))
+#fourcc = cv2.VideoWriter_fourcc('g', 'i', 'f', '') # gif
+out = cv2.VideoWriter('conway.avi', fourcc, 24, (xdim * scale, ydim * scale))
 #out = cv2.VideoWriter('conway.avi', fourcc, 60, (640,640))
 #for i in range(1,600):
 #    out.write(scaled_frame)
@@ -168,7 +187,7 @@ while True:
     alt_board = tmp_board
     alt_board.fill(0)
 
-    if frame_count == 768:
+    if frame_count == 128 * 4:
         break
 
 
