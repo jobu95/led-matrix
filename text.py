@@ -113,7 +113,7 @@ def renderScrollingText(image, text, yStepPx=4, pauseStartFrames=4, pauseEndFram
     curYPx = 0
     while True:
         curLine = int(curYPx / yCharSz)
-        if curLine > len(lines):
+        if curLine > len(lines) + 1:
             break
 
         line_slice = lines[curLine:curLine+maxLinesPerScreen+1]
@@ -122,8 +122,8 @@ def renderScrollingText(image, text, yStepPx=4, pauseStartFrames=4, pauseEndFram
         yOffsetPx = -1 * (curYPx % yCharSz)
         renderLines(image, line_slice, yOffsetPx=yOffsetPx)
 
-        if curLine % 7 == 0:
-            image.show()
+	time.sleep(0.5)
+	image.show()
 
         curYPx += yStepPx
 
@@ -131,10 +131,11 @@ xdim = 64
 ydim = 64
 image = Image.new('RGB', size=(xdim, ydim))
 
-renderScrollingText(image, "A spectre is haunting Europe - the spectre of communism. " +
-        "All the powers of old Europe have entered into a holy alliance to " +
-        "exorcise this spectre: Pope and Tsar, Metternich and Guizot, French " +
-        "Radicals and German police-spies.")
+renderScrollingText(image,
+        "A spectre is haunting Europe - the spectre of communism. \
+        All the powers of old Europe have entered into a holy alliance to \
+        exorcise this spectre: Pope and Tsar, Metternich and Guizot, French \
+        Radicals and German police-spies.")
 
 #text = ["I", "LOVE", "YOU"]
 #renderLines(image, text, xAlignment='LEFT', yAlignment='TOP')
