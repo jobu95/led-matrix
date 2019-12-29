@@ -2,6 +2,7 @@
 import imageio
 import re
 import sys
+import textwrap
 import time
 
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
@@ -73,17 +74,46 @@ class Video(Renderable):
                 #        (self.cur_repetition, self.n_repetitions, self.cur_frame, self.n_frames))
                 yield image
 
+# Taken from here:
+# http://code.activestate.com/recipes/358228-extend-textwraptextwrapper-to-handle-multiple-para/
+class DocWrapper(textwrap.TextWrapper):
+    def wrap(self, text):
+        para_edge = re.compile(r"(\n\n)", re.MULTILINE)
+        paragraphs = para_edge.split(text)
+        wrapped_lines = []
+        for para in paragraphs:
+            if para.isspace():
+                if not self.replace_whitespace:
+                    # Do not take the leading and trailing newlines since
+                    # joining the list with newlines (as self.fill will do)
+                    # will put them back in.
+                    if self.expand_tabs:
+                        para = para.expandtabs()
+                    wrapped_lines.append(para[1:-1])
+                else:
+                    # self.fill will end up putting in the needed newline to
+                    # space out the paragraphs
+                    wrapped_lines.append('')
+            else:
+                wrapped_lines.extend(textwrap.TextWrapper.wrap(self, para))
+        return wrapped_lines
+
 class ScrollingText(Renderable):
-    def __init__(self, font_filename, text_filename):
-        framerate = 60
+    def __init__(self, font_filename, text_filename, framerate=12):
         self.frame_dur_s = (1.0 / framerate)
         self.xCharSz = 5
         self.yCharSz = 8
+        self.lineSpacing = 1 # number of pixels between lines
         self.font = ImageFont.truetype(font_filename, self.yCharSz)
+
+        # text is small, just load it up all at once for simplicity's sake
+        with open(text_filename, 'r') as text_file:
+            self.text = re.sub(r'([^\n])\n([^\n])', r'\1 \2', text_file.read())
 
         xdim = 64
         ydim = 64
         self.image = Image.new('RGB', size=(xdim, ydim), color=(0,0,0))
+        self.draw = ImageDraw.Draw(self.image)
 
         print("frame duration (s): %f" % self.frame_dur_s)
 
@@ -121,67 +151,12 @@ class ScrollingText(Renderable):
             # TODO throw
             print("Invalid xAlignment")
 
-        draw = ImageDraw.Draw(self.image)
         t0 = time.time()
-        draw.text((xOffsetPx, yOffsetPx), line_str,
-                font=self.font)
+        self.image.paste((0,0,0), box=(0,0) + self.image.size)
+        self.draw.multiline_text((xOffsetPx, yOffsetPx), line_str,
+                font=self.font, spacing=self.lineSpacing)
         t1 = time.time()
-        print("renderLines dur: %f" % (t1 - t0))
-
-    def breakTextIntoLines(self, text, maxLines=-1):
-        xDim = self.image.size[0]
-        maxCharsPerLine = int(xDim / self.xCharSz)
-
-        lines = []
-
-        while len(text) > 0:
-
-            if len(text) <= maxCharsPerLine:
-                lines.append(text)
-                text = ""
-                continue
-
-            # Line needs to be broken
-            maxIdx = maxCharsPerLine
-
-            # Find last space
-            while text[maxIdx] != " " and maxIdx > 0:
-                maxIdx -= 1
-
-            line = ""
-
-            if maxIdx == 0:
-                # Word is > maxCharsPerLine long. Check if it has a hyphen
-                maxIdx = maxCharsPerLine
-                while text[maxIdx] != "-" and maxIdx > 0:
-                    maxIdx -= 1
-
-                if maxIdx == 0:
-                    # Word does not contain a hyphen. Break it
-                    maxIdx = maxCharsPerLine - 1
-                    line = (text[:maxIdx] + "-")
-                    text = text[maxIdx:]
-                else:
-                    # Word has a hyphen
-                    line = text[:maxIdx + 1]
-                    text = text[maxIdx + 1:]
-            else:
-                # Found a space
-                line = text[:maxIdx]
-                text = text[maxIdx + 1:]
-
-            line = line.strip()
-            line = re.sub(r'([^\n])\n', r'\1', line)
-
-            if len(line) == 0:
-                continue
-
-            lines.append(line)
-
-            if maxLines > 0 and len(lines) == maxLines:
-                break
-
-        return lines
+        #print("renderLines dur: %f" % (t1 - t0))
 
     # Render text from a string. Lines are automatically broken at whitespace, and
     # words are broken with hyphens if necessary.
@@ -190,34 +165,60 @@ class ScrollingText(Renderable):
     # * pause{Start,End}Frames control how many identical frames will be rendered at
     #   the start and end.
     # * yStepPx controls how many pixels each frame will shift up by while scrolling.
-    def renderScrollingText(self, text, yStepPx=1):
-        lines = self.breakTextIntoLines(text)
-
-        start_image = self.image.copy()
+    def renderScrollingText(self, yStepPx=1):
+        #textwrap.replace_whitespace = False
+        #textwrap.drop_whitespace = False
+        tw = DocWrapper()
+        tw.width = self.image.size[0] / self.xCharSz
+        lines = tw.wrap(self.text)
 
         yDim = self.image.size[1]
         maxLinesPerScreen = int(yDim / self.yCharSz)
 
         curYPx = 0
+        real_y_char_sz = self.yCharSz + self.lineSpacing
         while True:
-            curLine = int(curYPx / self.yCharSz)
+            curLine = int(curYPx / real_y_char_sz)
             if curLine > len(lines) + 1:
                 break
 
             line_slice = lines[curLine:curLine+maxLinesPerScreen+1]
 
-            self.image = start_image.copy()
-            yOffsetPx = -1 * (curYPx % self.yCharSz)
+            yOffsetPx = -1 * (curYPx % real_y_char_sz)
             self.renderLines(line_slice, yOffsetPx=yOffsetPx)
             yield self.image
             curYPx += yStepPx
 
     def getFrames(self):
-        return self.renderScrollingText(
-            "A spectre is haunting Europe - the spectre of communism. \
-            All the powers of old Europe have entered into a holy alliance to \
-            exorcise this spectre: Pope and Tsar, Metternich and Guizot, French \
-            Radicals and German police-spies.")
+        return self.renderScrollingText()
+
+    def saveFrames(self, frames, filename):
+        print("saving gif at %s" % filename)
+        print("frames len: %d" % len(frames))
+        frame_dur_ms = self.frame_dur_s * 1000
+        frames[0].save(filename, format='GIF', append_images=frames[1:], save_all=True,
+                duration=frame_dur_ms, loop=0)
+
+    def save(self, filename):
+        frames = []
+        i = 0
+        need_save = False
+        # split up clip into parts if it exceeds this # of frames
+        max_frames = 1000
+        for frame in self.getFrames():
+            need_save = True
+            i += 1
+            frames.append(frame.copy())
+            if i % max_frames == 0:
+                part_filename = str(int((i-1) / max_frames)).zfill(3) + "_" + filename
+                self.saveFrames(frames, part_filename)
+                need_save = False
+                frames = []
+        if need_save:
+            part_filename = filename
+            if i > max_frames:
+                part_filename = str(int(i / max_frames)).zfill(3) + "_" + filename
+            self.saveFrames(frames, part_filename)
 
 class FramePacer:
     def __init__(self, frame_dur_s):
@@ -231,7 +232,7 @@ class FramePacer:
             self.t0 = now
         while (now - self.t0 < (self.frame_dur_s - self.frame_dur_fudge_s)):
             now = time.time()
-            time.sleep(0.0005)
+            time.sleep(0.001)
         self.t0 = now
 
 class Screen:
@@ -245,15 +246,15 @@ class Screen:
         #print(options.scan_mode)
         self.matrix = RGBMatrix(options = options)
 
-video = Video(filename, 4)
-#video = ScrollingText('MONACO.TTF', 'manifesto.txt')
-
-pacer = FramePacer(video.frame_dur_s)
-screen = Screen()
-
-if True:
+if False:
+    video = Video(filename, 4)
+    screen = Screen()
+    pacer = FramePacer(video.frame_dur_s)
     for frame in video.getFrames():
         screen.matrix.SetImage(frame)
         # Sleep until it's time for the next frame
         pacer.waitFrame()
+else:
+    video = ScrollingText('MONACO.TTF', filename)
+    video.save(re.sub(r'.txt', r'.gif', filename))
 
