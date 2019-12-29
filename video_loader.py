@@ -2,6 +2,7 @@
 import imageio
 import re
 import sys
+import threading
 import textwrap
 import time
 
@@ -15,36 +16,50 @@ if len(sys.argv) != 2:
 filename = sys.argv[1]
 print("Filename: %s" % (filename))
 
-class Renderable:
+class Renderable(threading.Thread):
     def __init__(self):
-        return
+        threading.Thread.__init__(self)
+        # Subclasses must set this to a nonzero # of seconds
+        self.frame_dur_s = 0
 
+    # Subclasses must override this so that the MediaViewer can load the next
+    # Renderable's assets in a thread while the previous Renderable is still
+    # being displayed
+    def load(self):
+        pass
+
+    # Threading run() action. We want to be able to load videos in a separate
+    # thread. Running will occur in the main thread.
+    def run(self):
+        self.load()
+
+    # Return generator that yields frames in PIL (or Pillow) Image format
     def getFrames(self):
-        return
+        pass
 
-class Video(Renderable):
+class Video(Renderable, threading.Thread):
     def __init__(self, filename, n_repetitions):
-        t_start = time.time()
-        self.im = imageio.mimread(filename)
+        Renderable.__init__(self)
+        self.filename = filename
+        self.n_repetitions = n_repetitions
 
-        self.n_frames = 0
-        self.n_repetitions = 0
+    def load(self):
+        t_start = time.time()
+        self.im = imageio.mimread(self.filename)
 
         frame_dur_ms = self.im[0].meta['duration']
         self.frame_dur_s = frame_dur_ms / 1000.0
         self.cur_frame = 0
         self.n_frames = len(self.im)
         self.cur_repetition = 0
-        self.n_repetitions  = n_repetitions
 
-        print("n_reps: %d" % self.n_repetitions)
-
-        print("Frame duration (ms): %d" % (frame_dur_ms))
-        print("Resolution:          %d x %d" % (len(self.im[0]), len(self.im[0][0])))
-        print("# of frames:         %d" % (len(self.im)))
-        print("Duration (s):        %f" % (frame_dur_ms * len(self.im) / 1000.0))
-        print("Load time (s):       %f" % (time.time() - t_start))
-        print("")
+        print("Loaded video from %s" % self.filename)
+        print("  n_reps: %d" % self.n_repetitions)
+        print("  Frame duration (ms): %d" % (frame_dur_ms))
+        print("  Resolution:          %d x %d" % (len(self.im[0]), len(self.im[0][0])))
+        print("  # of frames:         %d" % (len(self.im)))
+        print("  Duration (s):        %f" % (frame_dur_ms * len(self.im) / 1000.0))
+        print("  Load time (s):       %f" % (time.time() - t_start))
 
     def hasFrame(self):
         return self.cur_frame < self.n_frames or self.cur_repetition < self.n_repetitions
@@ -118,7 +133,6 @@ class ScrollingText(Renderable):
         print("frame duration (s): %f" % self.frame_dur_s)
 
     def renderLines(self, lines, xAlignment='LEFT', yAlignment='TOP', yOffsetPx=0):
-
         # Handle yAlignment
         xDim = self.image.size[0]
         yDim = self.image.size[1]
@@ -166,8 +180,6 @@ class ScrollingText(Renderable):
     #   the start and end.
     # * yStepPx controls how many pixels each frame will shift up by while scrolling.
     def renderScrollingText(self, yStepPx=1):
-        #textwrap.replace_whitespace = False
-        #textwrap.drop_whitespace = False
         tw = DocWrapper()
         tw.width = self.image.size[0] / self.xCharSz
         lines = tw.wrap(self.text)
@@ -243,18 +255,73 @@ class Screen:
         options.chain_length = 1
         options.parallel = 1
         options.hardware_mapping = 'adafruit-hat-pwm'  # If you have an Adafruit HAT: 'adafruit-hat'
-        #print(options.scan_mode)
         self.matrix = RGBMatrix(options = options)
 
-if False:
+class MediaViewer:
+    def __init__(self):
+        self.video_queue = [None]
+
+    def enqueue_video(self, video):
+        self.video_queue.append(video)
+
+    def play(self):
+        # Acquire screen object
+        screen = Screen()
+
+        # Play all enqueued videos
+        i = 0
+        while len(self.video_queue) > 0:
+            # Grab video from front of queue
+            cur_video = self.video_queue[0]
+            self.video_queue = self.video_queue[1:]
+            nxt_video = None
+            if len(self.video_queue) > 0:
+                nxt_video = self.video_queue[0]
+
+            # Start next video loading
+            if nxt_video != None:
+                print("Loading video %d from file %s" % (i + 1,
+                    nxt_video.filename))
+                nxt_video.start()
+
+            # Start playing current video
+            if cur_video != None:
+                print("Playing video %d from file %s" % (i,
+                    cur_video.filename))
+                pacer = FramePacer(cur_video.frame_dur_s)
+                for frame in cur_video.getFrames():
+                    screen.matrix.SetImage(frame)
+                    # Sleep until it's time for the next frame
+                    pacer.waitFrame()
+
+            if nxt_video != None:
+                print("Waiting for video %d to finish loading from %s" % (i +
+                    1, nxt_video.filename))
+                t0 = time.time()
+                nxt_video.join()
+                t1 = time.time()
+                print("Time spent waiting for video %d to load: %f" % (i + 1, t1 - t0))
+
+            i += 1
+
+option = 2
+if option == 0:
     video = Video(filename, 4)
+    video.load()
     screen = Screen()
     pacer = FramePacer(video.frame_dur_s)
     for frame in video.getFrames():
         screen.matrix.SetImage(frame)
         # Sleep until it's time for the next frame
         pacer.waitFrame()
-else:
+elif option == 1:
     video = ScrollingText('MONACO.TTF', filename)
     video.save(re.sub(r'.txt', r'.gif', filename))
+elif option == 2:
+    viewer = MediaViewer()
+    viewer.enqueue_video(Video(filename, 6))
+    viewer.enqueue_video(Video(filename, 6))
+    viewer.enqueue_video(Video(filename, 6))
+    viewer.enqueue_video(Video(filename, 6))
+    viewer.play()
 
