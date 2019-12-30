@@ -1,0 +1,3 @@
+[submodule "c_app/ImageMagick"]
+	path = c_app/ImageMagick
+	url = https://github.com/ImageMagick/ImageMagick
