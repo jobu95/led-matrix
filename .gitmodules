@@ -1,3 +1,6 @@
 [submodule "c_app/ImageMagick"]
 	path = c_app/ImageMagick
 	url = https://github.com/ImageMagick/ImageMagick
+[submodule "c_app/rpi-rgb-led-matrix"]
+	path = c_app/rpi-rgb-led-matrix
+	url = https://github.com/hzeller/rpi-rgb-led-matrix

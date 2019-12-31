@@ -9,6 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <signal.h>
+#include <sstream>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>

@@ -1,15 +1,28 @@
 CXX=g++
 
-CXXFLAGS=-c --std=c++17 -g -O2
-CXXFLAGS+=-fopenmp -DMAGICKCORE_HDRI_ENABLE=1 -DMAGICKCORE_QUANTUM_DEPTH=16
-CXXFLAGS+=-IImageMagick/Magick++/lib/ -IImageMagick
-CXXFLAGS+=-I../rpi-rgb-led-matrix/include
+OS_FAMILY=$(shell uname -s)
 
-LDFLAGS=--std=c++17 -lstdc++fs
-LDFLAGS+=-LImageMagick/Magick++/lib/.libs/ -lMagick++-7.Q16HDRI
-LDFLAGS+=-LImageMagick/MagickWand/.libs/ -lMagickWand-7.Q16HDRI
-LDFLAGS+=-LImageMagick/MagickCore/.libs/ -lMagickCore-7.Q16HDRI
-LDFLAGS+=-L../rpi-rgb-led-matrix/lib -lrgbmatrix -lpthread
+CXXFLAGS:=-c -g -O2 --std=c++17
+CXXFLAGS+=-DMAGICKCORE_HDRI_ENABLE=1 -DMAGICKCORE_QUANTUM_DEPTH=16
+CXXFLAGS+=-I./ImageMagick/Magick++/lib/ -I./ImageMagick
+CXXFLAGS+=-I./rpi-rgb-led-matrix/include
+ifeq ($(OS_FAMILY),Darwin)
+	CXXFLAGS+=-Xpreprocessor -fopenmp
+else
+	CXXFLAGS+=
+	CXXFLAGS+=-fopenmp
+endif
+
+LDFLAGS:=--std=c++17
+LDFLAGS+=-L./ImageMagick/Magick++/lib/.libs/ -lMagick++-7.Q16HDRI
+LDFLAGS+=-L./ImageMagick/MagickWand/.libs/ -lMagickWand-7.Q16HDRI
+LDFLAGS+=-L./ImageMagick/MagickCore/.libs/ -lMagickCore-7.Q16HDRI
+LDFLAGS+=-L./rpi-rgb-led-matrix/lib -lrgbmatrix -lpthread
+ifeq ($(OS_FAMILY),Darwin)
+	LDFLAGS+=-lomp
+else
+ 	LDFLAGS+=-lstdc++fs
+endif
 
 LD_LIBRARY_PATH:=ImageMagick/Magick++/lib/.libs:ImageMagick/MagickWand/.libs:ImageMagick/MagickCore/.libs:../rpi-rgb-led-matrix/lib
 
