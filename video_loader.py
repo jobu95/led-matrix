@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-import imageio
+#!/usr/bin/env python3
+import os
 import re
 import sys
 import threading
@@ -7,7 +7,7 @@ import textwrap
 import time
 
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
-from PIL import Image, ImageColor, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageSequence
 
 if len(sys.argv) != 2:
     print("Usage: %s <filename>" % (sys.argv[0]))
@@ -15,6 +15,11 @@ if len(sys.argv) != 2:
 
 filename = sys.argv[1]
 print("Filename: %s" % (filename))
+
+dbg_printing_enabled = False
+def dbg_print(*args):
+    if dbg_printing_enabled:
+        print(*args)
 
 class Renderable(threading.Thread):
     def __init__(self):
@@ -37,7 +42,7 @@ class Renderable(threading.Thread):
     def getFrames(self):
         pass
 
-class Video(Renderable, threading.Thread):
+class Video(Renderable):
     def __init__(self, filename, n_repetitions):
         Renderable.__init__(self)
         self.filename = filename
@@ -45,21 +50,22 @@ class Video(Renderable, threading.Thread):
 
     def load(self):
         t_start = time.time()
-        self.im = imageio.mimread(self.filename)
+        self.im = Image.open(self.filename)
 
-        frame_dur_ms = self.im[0].meta['duration']
+        frame_dur_ms = self.im.info['duration']
         self.frame_dur_s = frame_dur_ms / 1000.0
         self.cur_frame = 0
-        self.n_frames = len(self.im)
+        self.n_frames = self.im.n_frames
         self.cur_repetition = 0
 
-        print("Loaded video from %s" % self.filename)
-        print("  n_reps: %d" % self.n_repetitions)
-        print("  Frame duration (ms): %d" % (frame_dur_ms))
-        print("  Resolution:          %d x %d" % (len(self.im[0]), len(self.im[0][0])))
-        print("  # of frames:         %d" % (len(self.im)))
-        print("  Duration (s):        %f" % (frame_dur_ms * len(self.im) / 1000.0))
-        print("  Load time (s):       %f" % (time.time() - t_start))
+        dbg_print("Loaded video from %s" % self.filename)
+        dbg_print("  n_reps: %d" % self.n_repetitions)
+        dbg_print("  Frame duration (ms): %d" % (frame_dur_ms))
+        dbg_print("  Resolution:          %d x %d" % (self.im.width,
+            self.im.height))
+        dbg_print("  # of frames:         %d" % (self.n_frames))
+        dbg_print("  Duration (s):        %f" % (self.frame_dur_s * self.n_frames))
+        dbg_print("  Load time (s):       %f" % (time.time() - t_start))
 
     def hasFrame(self):
         return self.cur_frame < self.n_frames or self.cur_repetition < self.n_repetitions
@@ -81,13 +87,12 @@ class Video(Renderable, threading.Thread):
 
     def getFrames(self):
         while self.hasFrame():
-            for frame in self.im:
+            for frame in ImageSequence.Iterator(self.im):
                 if not self.iterateFrame():
                     return
-                image = Image.fromarray(frame).convert('RGB')
                 #print("(rep: %d/%d) (frame: %d/%d)" %
                 #        (self.cur_repetition, self.n_repetitions, self.cur_frame, self.n_frames))
-                yield image
+                yield frame.convert('RGB')
 
 # Taken from here:
 # http://code.activestate.com/recipes/358228-extend-textwraptextwrapper-to-handle-multiple-para/
@@ -130,7 +135,7 @@ class ScrollingText(Renderable):
         self.image = Image.new('RGB', size=(xdim, ydim), color=(0,0,0))
         self.draw = ImageDraw.Draw(self.image)
 
-        print("frame duration (s): %f" % self.frame_dur_s)
+        dbg_print("frame duration (s): %f" % self.frame_dur_s)
 
     def renderLines(self, lines, xAlignment='LEFT', yAlignment='TOP', yOffsetPx=0):
         # Handle yAlignment
@@ -170,7 +175,7 @@ class ScrollingText(Renderable):
         self.draw.multiline_text((xOffsetPx, yOffsetPx), line_str,
                 font=self.font, spacing=self.lineSpacing)
         t1 = time.time()
-        #print("renderLines dur: %f" % (t1 - t0))
+        #dbg_print("renderLines dur: %f" % (t1 - t0))
 
     # Render text from a string. Lines are automatically broken at whitespace, and
     # words are broken with hyphens if necessary.
@@ -205,8 +210,8 @@ class ScrollingText(Renderable):
         return self.renderScrollingText()
 
     def saveFrames(self, frames, filename):
-        print("saving gif at %s" % filename)
-        print("frames len: %d" % len(frames))
+        dbg_print("saving gif at %s" % filename)
+        dbg_print("frames len: %d" % len(frames))
         frame_dur_ms = self.frame_dur_s * 1000
         frames[0].save(filename, format='GIF', append_images=frames[1:], save_all=True,
                 duration=frame_dur_ms, loop=0)
@@ -245,7 +250,11 @@ class FramePacer:
         while (now - self.t0 < (self.frame_dur_s - self.frame_dur_fudge_s)):
             now = time.time()
             time.sleep(0.001)
-        self.t0 = now
+        self.t0 += self.frame_dur_s
+        should_drop_frame = False
+        if now - self.t0 > self.frame_dur_s:
+            should_drop_frame = True
+        return should_drop_frame
 
 class Screen:
     def __init__(self):
@@ -280,29 +289,51 @@ class MediaViewer:
 
             # Start next video loading
             if nxt_video != None:
-                print("Loading video %d from file %s" % (i + 1,
+                dbg_print("Loading video %d from file %s" % (i + 1,
                     nxt_video.filename))
                 nxt_video.start()
 
             # Start playing current video
             if cur_video != None:
-                print("Playing video %d from file %s" % (i,
+                dbg_print("Playing video %d from file %s" % (i,
                     cur_video.filename))
                 pacer = FramePacer(cur_video.frame_dur_s)
+                skip_frame = False
                 for frame in cur_video.getFrames():
-                    screen.matrix.SetImage(frame)
+                    if not skip_frame:
+                        screen.matrix.SetImage(frame)
                     # Sleep until it's time for the next frame
-                    pacer.waitFrame()
+                    skip_frame = pacer.waitFrame()
 
             if nxt_video != None:
-                print("Waiting for video %d to finish loading from %s" % (i +
+                dbg_print("Waiting for video %d to finish loading from %s" % (i +
                     1, nxt_video.filename))
                 t0 = time.time()
                 nxt_video.join()
                 t1 = time.time()
-                print("Time spent waiting for video %d to load: %f" % (i + 1, t1 - t0))
+                dbg_print("Time spent waiting for video %d to load: %f" % (i + 1, t1 - t0))
 
             i += 1
+
+# Load a video from a filename. If the filename has been broken up into chunks
+# like
+# $(dirname filename)/000_$(basename filename)
+# then this will return Video objects for each part.
+def loadVideoList(filename, n_repetitions):
+    video_ls = []
+    if os.path.exists(filename):
+        video_ls.append(Video(filename, n_repetitions))
+        return video_ls
+    file_dir = os.path.dirname(filename)
+    file_base = os.path.basename(filename)
+    for i in range(0, n_repetitions):
+        for i in range(0, 1000):
+            cur_filename = os.path.join(file_dir, str(i).zfill(3) + "_" +
+                    file_base)
+            if not os.path.exists(cur_filename):
+                break
+            video_ls.append(Video(cur_filename, 1))
+    return video_ls
 
 option = 2
 if option == 0:
@@ -319,9 +350,8 @@ elif option == 1:
     video.save(re.sub(r'.txt', r'.gif', filename))
 elif option == 2:
     viewer = MediaViewer()
-    viewer.enqueue_video(Video(filename, 6))
-    viewer.enqueue_video(Video(filename, 6))
-    viewer.enqueue_video(Video(filename, 6))
-    viewer.enqueue_video(Video(filename, 6))
+    video_ls = loadVideoList(filename, 4)
+    for video in video_ls:
+        viewer.enqueue_video(video)
     viewer.play()
 

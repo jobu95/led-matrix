@@ -150,12 +150,12 @@ def printBoard(board):
 
 frame_delay_ms = 16
 cv2.namedWindow('conway', cv2.WINDOW_NORMAL)
-cv2.resizeWindow('conway', 640, 640)
+cv2.resizeWindow('conway', xdim * scale, ydim * scale)
 frame_count = 0
 alt_board = np.zeros((xdim, ydim), np.bool)
 frame = np.zeros((xdim, ydim, chan), np.uint8)
 
-scale = 10
+scale = 1
 scaled_frame = np.zeros((xdim * scale, ydim * scale, chan), np.uint8)
 #scaled_frame = np.zeros((640, 640, chan), np.uint8)
 

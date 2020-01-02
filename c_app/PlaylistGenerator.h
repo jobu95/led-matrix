@@ -4,7 +4,7 @@
 #include <list>
 #include <map>
 #include <string>
-#include <unordered_set>
+#include <set>
 #include <vector>
 
 // Takes a manifest in CSV format:
@@ -40,7 +40,7 @@ class PlaylistGenerator
   private:
     int m_max_shock_score;
 
-    std::unordered_set<EntryPtr> m_entry_ptr_set;
+    std::set<EntryPtr> m_entry_ptr_set;
     std::map<std::string, std::list<EntryPtr>> m_tag_to_entries;
 };
 

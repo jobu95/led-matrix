@@ -1,5 +1,6 @@
 #include "PlaylistGenerator.h"
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <random>
@@ -46,6 +47,7 @@ bool PlaylistGenerator::parseManifest(const filesystem::path &manifest_path)
       continue;
     }
     auto filename    = filesystem::path(tokens[0]);
+    filename.replace_extension(".stream");
     auto shock_score = 0;
     try {
       shock_score = stoi(tokens[1]);
@@ -127,31 +129,19 @@ std::list<PlaylistGenerator::EntryPtr> PlaylistGenerator::getPlaylist(
   playlist.push_back(*entry_iter);
   // pick first tag randomly
   auto cur_tag = pickRandomTag(*entry_iter);
+  set<EntryPtr> cur_tag_history;
 
   while (playlist.size() < length) {
     const auto &cur_entry = playlist.back();
     cerr << "Entry: " << cur_entry->filename.string() << endl;
     cerr << "Tag:   " << cur_tag << endl;
+    cur_tag_history.insert(cur_entry);
 
-    // find all videos that share a tag with the current entry
-    unordered_set<EntryPtr> candidates;
-    for (const auto &tag : cur_entry->tags) {
-      const auto entries_iter = m_tag_to_entries.find(tag);
-      if (entries_iter == m_tag_to_entries.end()) {
-        // this should never happen
-        cerr << "fuck" << endl;
-        continue;
-      }
-      for (const auto &entry : entries_iter->second) {
-        candidates.insert(entry);
-      }
-    }
-
-    // filter out the current entry from the set of candidates
-    if (const auto cur_entry_iter = candidates.find(cur_entry);
-        cur_entry_iter != candidates.end()) {
-      candidates.erase(cur_entry_iter);
-    }
+    // find all videos that haven't been played yet under the current tag
+    set<EntryPtr> candidates;
+    set_difference(m_entry_ptr_set.begin(), m_entry_ptr_set.end(),
+        cur_tag_history.begin(), cur_tag_history.end(),
+        inserter(candidates, candidates.begin()));
 
     // assign each next hop a weight based on shock scores & whether the tag
     // matches our "current" tag.
@@ -177,18 +167,29 @@ std::list<PlaylistGenerator::EntryPtr> PlaylistGenerator::getPlaylist(
 
     // update tag if needed
     const auto& next_entry = playlist.back();
+    cerr << "Next entry: " << next_entry->filename.string() << endl;
     if (find(next_entry->tags.begin(), next_entry->tags.end(), cur_tag) ==
         next_entry->tags.end()) {
+      cerr << "Picking new tag" << endl;
       // previous tag is no longer in use. Pick first tag we have in common.
       // TODO randomizing this choice would be ideal.
       for (const auto &cur_entry_tag : cur_entry->tags) {
-        for (const auto &nxt_entry_tag : next_entry->tags) {
-          if (cur_entry_tag == nxt_entry_tag) {
-            cur_tag = nxt_entry_tag;
-          }
+        if (const auto tag_iter =
+            find(next_entry->tags.begin(), next_entry->tags.end(), cur_entry_tag);
+            tag_iter != next_entry->tags.end()) {
+          cur_tag = cur_entry_tag;
+          cur_tag_history.clear();
+          break;
         }
       }
+      // If no tags in common, pick first tag from next entry.
+      if (const auto tag_iter =
+          find(next_entry->tags.begin(), next_entry->tags.end(), cur_tag);
+          tag_iter == next_entry->tags.end()) {
+        cur_tag = pickRandomTag(next_entry);
+      }
     }
+    cerr << "Next tag: " << cur_tag << endl;
   }
 
   return playlist;

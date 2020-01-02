@@ -1,3 +1,5 @@
+#include "PlaylistGenerator.h"
+
 #include <led-matrix.h>
 #include <content-streamer.h>
 #include <Magick++.h>
@@ -5,7 +7,6 @@
 #include <chrono>
 #include <errno.h>
 #include <fcntl.h>
-#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -70,9 +71,9 @@ list<filesystem::path> getFilesFromFilename(const filesystem::path &filename)
   return files;
 }
 
-volatile bool interrupt_received = false;
+volatile bool G_interrupt_received = false;
 static void InterruptHandler(int /*signo*/) {
-  interrupt_received = true;
+  G_interrupt_received = true;
 }
 
 vector<Image> loadFile(const std::string &filename) {
@@ -109,7 +110,6 @@ void sendImagesToStream(const vector<Image> &images,
     rgb_matrix::StreamWriter *stream_writer_p) {
   cout << "Converting to RGBMatrix format... " << flush;
   for (const auto &image : images) {
-    canvas_off_p->Clear(); // TODO is this necessary?
     for (size_t y = 0; y < image.rows(); y++) {
       for (size_t x = 0; x < image.columns(); x++) {
         const Magick::Color &c = image.pixelColor(x, y);
@@ -121,7 +121,7 @@ void sendImagesToStream(const vector<Image> &images,
     }
     const auto delay_us = image.animationDelay() * 10000;
     stream_writer_p->Stream(*canvas_off_p, delay_us);
-    if (interrupt_received) {
+    if (G_interrupt_received) {
       break;
     }
   }
@@ -155,6 +155,56 @@ unique_ptr<RGBMatrix> createMatrix(char **argv, const bool convert_to_stream)
   return matrix_p;
 }
 
+bool displayFile(const filesystem::path &filename, const bool convert_to_stream,
+    const int loops, unique_ptr<RGBMatrix> &matrix_p,
+    FrameCanvas *canvas_off_p
+    )
+{
+  for (int i = 0; i < loops; i++) {
+    for (const auto &cur_file : getFilesFromFilename(filename)) {
+      if (G_interrupt_received) {
+        break;
+      }
+      if (convert_to_stream) {
+        cerr << "Converting " << cur_file.string() << endl;
+        // Convert PIL into RGBMatrix form
+        auto new_file(cur_file);
+        new_file.replace_extension(".stream");
+        const int stream_fd = open(new_file.string().c_str(), O_CREAT|O_WRONLY, 0644);
+        if (-1 == stream_fd) {
+          cerr << "Failed to create " << new_file.string() << ": " << strerror(errno) << endl;
+          return false;
+        }
+        auto stream_p = make_unique<rgb_matrix::FileStreamIO>(stream_fd);
+        // Write out stream
+        auto stream_writer_p = make_unique<rgb_matrix::StreamWriter>(stream_p.get());
+        const auto images = loadFile(cur_file.string());
+        sendImagesToStream(images, canvas_off_p, stream_writer_p.get());
+      } else {
+        // Open RGBMatrix stream file for reading
+        const int stream_fd = open(cur_file.string().c_str(), O_RDONLY);
+        if (-1 == stream_fd) {
+          cerr << "Failed to open " << cur_file.string() << ": " << strerror(errno) << endl;
+          return false;
+        }
+        rgb_matrix::FileStreamIO stream(stream_fd);
+        // Display stream
+        rgb_matrix::StreamReader image_stream_reader(&stream);
+        uint32_t delay_us = 0;
+        class FramePacer pacer;
+        while (!G_interrupt_received &&
+            image_stream_reader.GetNext(canvas_off_p, &delay_us)) {
+          if (!pacer.waitFrame(microseconds(delay_us))) {
+            continue;
+          }
+          canvas_off_p = matrix_p->SwapOnVSync(canvas_off_p);
+        }
+      }
+    }
+  }
+  return true;
+}
+
 int main(int argc,char **argv)
 {
   if (2 != argc) {
@@ -163,7 +213,8 @@ int main(int argc,char **argv)
   }
   filesystem::path filename(argv[1]);
   cout << "Filename: " << filename.string() << endl;
-  const bool convert_to_stream = (filename.extension().string() != ".stream");
+  const bool make_playlist = (filename.filename().string() == "manifest.txt");
+  const bool convert_to_stream = (!make_playlist && filename.extension().string() != ".stream");
   if (convert_to_stream) {
     cout << "Converting file to .stream files" << endl;
   } else {
@@ -180,49 +231,27 @@ int main(int argc,char **argv)
     cerr << "Failed to get matrix or off-screen canvas" << endl;
   }
 
-  for (const auto &cur_file : getFilesFromFilename(filename)) {
-    if (interrupt_received) {
-      break;
+  if (make_playlist) {
+    PlaylistGenerator g;
+    if (!g.parseManifest(filesystem::path(filename))) {
+      return 1;
     }
-    if (convert_to_stream) {
-      cerr << "Converting " << cur_file.string() << endl;
-      // Convert PIL into RGBMatrix form
-      auto new_file(cur_file);
-      new_file.replace_extension(".stream");
-      const int stream_fd = open(new_file.string().c_str(), O_CREAT|O_WRONLY, 0644);
-      if (-1 == stream_fd) {
-        cerr << "Failed to create " << new_file.string() << ": " << strerror(errno) << endl;
+    const auto playlist = g.getPlaylist(100);
+    for (const auto &entry : playlist) {
+      auto cur_file = filename.parent_path() / entry->filename;
+      cerr << "Loading file " << cur_file.string().c_str() << endl;
+      const bool convert_to_stream = false; // assume everything in manifest has already been converted
+      if (!displayFile(cur_file, convert_to_stream, entry->iterations,
+            matrix_p, canvas_off_p)) {
         return 1;
       }
-      auto stream_p = make_unique<rgb_matrix::FileStreamIO>(stream_fd);
-      // Write out stream
-      auto stream_writer_p = make_unique<rgb_matrix::StreamWriter>(stream_p.get());
-      const auto images = loadFile(cur_file.string());
-      sendImagesToStream(images, canvas_off_p, stream_writer_p.get());
-    } else {
-      cerr << "Displaying " << cur_file.string() << endl;
-      // Open RGBMatrix stream file for reading
-      const int stream_fd = open(cur_file.string().c_str(), O_RDONLY);
-      if (-1 == stream_fd) {
-        cerr << "Failed to open " << cur_file.string() << ": " << strerror(errno) << endl;
-        return 1;
-      }
-      rgb_matrix::FileStreamIO stream(stream_fd);
-      // Display stream
-      rgb_matrix::StreamReader image_stream_reader(&stream);
-      uint32_t delay_us = 0;
-      class FramePacer pacer;
-      while (!interrupt_received &&
-          image_stream_reader.GetNext(canvas_off_p, &delay_us)) {
-        if (!pacer.waitFrame(microseconds(delay_us))) {
-          cerr << "skipping frame" << endl;
-          continue;
-        }
-        canvas_off_p = matrix_p->SwapOnVSync(canvas_off_p);
-        // TODO sleep until next frame
-      }
+    }
+  } else {
+    if (!displayFile(filename, convert_to_stream, 1 /*loops*/, matrix_p, canvas_off_p)) {
+      return 1;
     }
   }
+
   return 0;
 }
 
